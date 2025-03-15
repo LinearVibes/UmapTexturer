@@ -1,0 +1,83 @@
+import bpy
+import os
+import difflib
+
+# Put the directory of the map files (not game files)
+texture_root_folder = "PLACEPATHHERE" 
+## EX: C:\\Users\\NAME\\Downloads\\FortniteUMap\\Game
+
+# Define texture type variations for better matching
+TEXTURE_TYPES = {
+    "diffuse": ["_dif", "_d", "_diffuse", "_basecolor", "_albedo"],
+    "normal": ["_n", "_normal", "_nor"],
+}
+
+# Function to find the best matching texture
+def find_best_texture(material_name, texture_keywords):
+    best_match = None
+    best_ratio = 0.0  # Higher is better
+
+    # Search through all subfolders for textures
+    for root, _, files in os.walk(texture_root_folder):
+        for file in files:
+            if file.lower().endswith((".png", ".tga", ".jpg", ".jpeg", ".dds")):
+                file_name_no_ext = os.path.splitext(file)[0].lower()  # Remove extension
+                material_name_lower = material_name.lower()
+
+                # Check if any keyword matches
+                if any(keyword in file_name_no_ext for keyword in texture_keywords):
+                    # Calculate similarity ratio
+                    ratio = difflib.SequenceMatcher(None, material_name_lower, file_name_no_ext).ratio()
+
+                    # Prioritize exact matches or close ones
+                    if ratio > best_ratio:
+                        best_match = os.path.join(root, file)
+                        best_ratio = ratio
+
+    return best_match
+
+# Iterate over all materials in Blender
+for material in bpy.data.materials:
+    mat_name = material.name
+
+    # Ensure material uses nodes
+    material.use_nodes = True
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+
+    # Clear all existing nodes
+    for node in nodes:
+        nodes.remove(node)
+
+    # Create new Principled BSDF
+    shader_node = nodes.new(type="ShaderNodeBsdfPrincipled")
+    shader_node.location = (0, 0)
+
+    # Create Material Output
+    output_node = nodes.new(type="ShaderNodeOutputMaterial")
+    output_node.location = (400, 0)
+
+    # Connect BSDF to Output
+    links.new(shader_node.outputs["BSDF"], output_node.inputs["Surface"])
+
+    # Find best textures
+    diffuse_texture_path = find_best_texture(mat_name, TEXTURE_TYPES["diffuse"])
+    normal_texture_path = find_best_texture(mat_name, TEXTURE_TYPES["normal"])
+
+    # Apply Diffuse Texture
+    if diffuse_texture_path:
+        tex_node = nodes.new(type="ShaderNodeTexImage")
+        tex_node.image = bpy.data.images.load(diffuse_texture_path)
+        links.new(shader_node.inputs["Base Color"], tex_node.outputs["Color"])
+        print(f"Applied diffuse texture to {mat_name}: {diffuse_texture_path}")
+
+    # Apply Normal Map
+    if normal_texture_path:
+        tex_node = nodes.new(type="ShaderNodeTexImage")
+        tex_node.image = bpy.data.images.load(normal_texture_path)
+        normal_map_node = nodes.new(type="ShaderNodeNormalMap")
+        links.new(normal_map_node.inputs["Color"], tex_node.outputs["Color"])
+        links.new(shader_node.inputs["Normal"], normal_map_node.outputs["Normal"])
+        print(f"Applied normal map to {mat_name}: {normal_texture_path}")
+
+print("Texture assignment complete!")
